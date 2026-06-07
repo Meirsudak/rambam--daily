@@ -4,61 +4,59 @@ import sys
 from email.mime.text import MIMEText
 
 import requests
-from bs4 import BeautifulSoup
 
-URL = "https://www.chabad.org/dailystudy/rambam_cdo/rambamChapters/3"
+CALENDAR_URL = "https://www.sefaria.org/api/calendars"
+TEXTS_URL = "https://www.sefaria.org/api/texts/{ref}?context=0&pad=0&lang=en"
 
 
-def fetch_page(url):
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/125.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    }
-    session = requests.Session()
-    resp = session.get(url, headers=headers, timeout=30)
+def get_today_rambam_ref():
+    resp = requests.get(CALENDAR_URL, timeout=30)
     resp.raise_for_status()
-    return resp.text
+    items = resp.json().get("calendar_items", [])
+    # Prefer the 3-chapter version; fall back to any Rambam entry
+    for item in items:
+        if "Rambam" in item.get("title", {}).get("en", "") and "3" in item.get("title", {}).get("en", ""):
+            return item["ref"], item.get("displayValue", {}).get("en", item["ref"])
+    for item in items:
+        if "Rambam" in item.get("title", {}).get("en", ""):
+            return item["ref"], item.get("displayValue", {}).get("en", item["ref"])
+    raise ValueError("No Rambam entry found in today's Sefaria calendar")
 
 
-def parse_rambam(html):
-    soup = BeautifulSoup(html, "html.parser")
-
-    titles = [h2.get_text(strip=True) for h2 in soup.select("h2.rambam_h2")]
-    if not titles:
-        raise ValueError("No chapter titles found — page structure may have changed")
-
-    # Remove Hebrew spans before extracting verse text
-    for hebrew in soup.select("span[lang='he']"):
-        hebrew.decompose()
-
-    halachot = [span.get_text(strip=True) for span in soup.select("span.co_verse")]
-    if not halachot:
-        raise ValueError("No halacha verses found — page structure may have changed")
-
-    return {"titles": titles, "halachot": halachot}
+def fetch_text(ref):
+    url = TEXTS_URL.format(ref=requests.utils.quote(ref, safe=""))
+    resp = requests.get(url, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    text = data.get("text")
+    if not text:
+        raise ValueError(f"No English text returned for ref: {ref}")
+    return data
 
 
-def build_subject(titles):
-    return " | ".join(titles)
+def flatten_text(text):
+    """Handle both flat list (1 chapter) and nested list (multiple chapters)."""
+    if isinstance(text[0], list):
+        return text  # already [[ch1_h1, ch1_h2], [ch2_h1, ...], ...]
+    return [text]   # wrap single chapter
 
 
-def build_body(titles, halachot):
-    lines = []
-    for title in titles:
-        lines.append(title)
-        lines.append("=" * len(title))
-    lines.append("")
-    for i, text in enumerate(halachot, 1):
-        lines.append(f"{i}. {text}")
-    return "\n".join(lines)
+def build_subject(display_value):
+    return f"Daily Rambam — {display_value}"
+
+
+def build_body(ref, chapters):
+    lines = [f"Daily Rambam: {ref}", "=" * (len(ref) + 15), ""]
+    for chapter_num, halachot in enumerate(chapters, 1):
+        if len(chapters) > 1:
+            lines.append(f"Chapter {chapter_num}")
+            lines.append("-" * 20)
+        for i, halacha in enumerate(halachot, 1):
+            text = halacha.strip() if isinstance(halacha, str) else ""
+            if text:
+                lines.append(f"{i}. {text}")
+        lines.append("")
+    return "\n".join(lines).strip()
 
 
 def send_email(subject, body, gmail_address, app_password, to_email):
@@ -66,7 +64,6 @@ def send_email(subject, body, gmail_address, app_password, to_email):
     msg["Subject"] = subject
     msg["From"] = gmail_address
     msg["To"] = to_email
-
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(gmail_address, app_password)
         server.sendmail(gmail_address, to_email, msg.as_string())
@@ -78,17 +75,16 @@ def main():
     to_email = os.environ["TO_EMAIL"]
 
     try:
-        html = fetch_page(URL)
-        data = parse_rambam(html)
-        subject = build_subject(data["titles"])
-        body = build_body(data["titles"], data["halachot"])
+        ref, display_value = get_today_rambam_ref()
+        data = fetch_text(ref)
+        chapters = flatten_text(data["text"])
+        subject = build_subject(display_value)
+        body = build_body(ref, chapters)
         send_email(subject, body, gmail_address, app_password, to_email)
         print(f"Email sent: {subject}")
     except Exception as exc:
-        error_subject = "Rambam Daily: fetch failed"
-        error_body = (
-            f"The daily Rambam script encountered an error:\n\n{type(exc).__name__}: {exc}"
-        )
+        error_subject = "Daily Rambam: fetch failed"
+        error_body = f"The daily Rambam script encountered an error:\n\n{type(exc).__name__}: {exc}"
         try:
             send_email(error_subject, error_body, gmail_address, app_password, to_email)
             print(f"Fallback error email sent: {exc}", file=sys.stderr)
