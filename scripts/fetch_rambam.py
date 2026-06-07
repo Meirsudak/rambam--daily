@@ -6,7 +6,7 @@ from email.mime.text import MIMEText
 import requests
 
 CALENDAR_URL = "https://www.sefaria.org/api/calendars"
-TEXTS_URL = "https://www.sefaria.org/api/texts/{ref}?context=0&pad=0&lang=en"
+TEXTS_URL = "https://www.sefaria.org/api/texts/{ref}?context=0&pad=0&lang=he"
 
 
 def get_today_rambam_ref():
@@ -28,9 +28,9 @@ def fetch_text(ref):
     resp = requests.get(url, timeout=30)
     resp.raise_for_status()
     data = resp.json()
-    text = data.get("text")
+    text = data.get("he")
     if not text:
-        raise ValueError(f"No English text returned for ref: {ref}")
+        raise ValueError(f"No Hebrew text returned for ref: {ref}")
     return data
 
 
@@ -42,7 +42,7 @@ def flatten_text(text):
 
 
 def build_subject(display_value):
-    return f"Daily Rambam — {display_value}"
+    return f"רמב\"ם יומי — {display_value}"
 
 
 def build_body(ref, chapters):
@@ -77,7 +77,7 @@ def main():
     try:
         ref, display_value = get_today_rambam_ref()
         data = fetch_text(ref)
-        chapters = flatten_text(data["text"])
+        chapters = flatten_text(data["he"])
         subject = build_subject(display_value)
         body = build_body(ref, chapters)
         send_email(subject, body, gmail_address, app_password, to_email)
