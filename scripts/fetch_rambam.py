@@ -9,16 +9,34 @@ from bs4 import BeautifulSoup
 
 CALENDAR_URL = "https://www.sefaria.org/api/calendars"
 TEXTS_URL = "https://www.sefaria.org/api/texts/{ref}?context=0&pad=0&lang=he"
-
-_HEB_LETTERS = "אבגדהוזחטיכלמנסעפצקרשת"
-
-def to_hebrew_numeral(n):
-    """Convert 1-based integer to Hebrew letter (א=1 … כ=20 …)."""
-    if 1 <= n <= len(_HEB_LETTERS):
-        return _HEB_LETTERS[n - 1]
-    return str(n)
-
 FONT = "'Frank Ruhl Libre', 'Noto Serif Hebrew', Georgia, serif"
+
+# Each study: search keywords (matched against calendar title.en),
+# optional keyword that must also appear (for preferring 3-chapter Rambam),
+# Hebrew header shown in the email, and label prefix for each unit.
+STUDIES = [
+    {
+        "keywords": ["Rambam"],
+        "prefer_also": "3",
+        "he_header": 'רמב"ם יומי',
+        "unit_label": "הל'",
+    },
+    {
+        "keywords": ["Tanya"],
+        "he_header": "תניא יומי",
+        "unit_label": "פס'",
+    },
+    {
+        "keywords": ["Psalms", "Tehillim"],
+        "he_header": "תהילים יומי",
+        "unit_label": "פס'",
+    },
+    {
+        "keywords": ["Chumash", "Chitas", "Torah Portion", "Parasha"],
+        "he_header": "חומש יומי",
+        "unit_label": "פס'",
+    },
+]
 
 HTML_TEMPLATE = """\
 <!DOCTYPE html>
@@ -40,7 +58,7 @@ HTML_TEMPLATE = """\
           <td align="center" dir="rtl"
               style="background:#2c5f2e;padding:28px 32px 22px;text-align:center;">
             <div style="font-family:{font};font-size:28px;font-weight:700;color:#fff;margin:0;">
-              רמב"ם יומי
+              {he_header}
             </div>
             <div style="font-family:{font};font-size:15px;color:#c8e6c9;margin-top:6px;">
               {display_value}
@@ -68,20 +86,42 @@ HTML_TEMPLATE = """\
 </html>
 """
 
+_HEB_LETTERS = "אבגדהוזחטיכלמנסעפצקרשת"
 
-def get_today_rambam_ref():
+
+def to_hebrew_numeral(n):
+    if 1 <= n <= len(_HEB_LETTERS):
+        return _HEB_LETTERS[n - 1]
+    return str(n)
+
+
+def get_all_calendar_items():
     resp = requests.get(CALENDAR_URL, timeout=30)
     resp.raise_for_status()
-    items = resp.json().get("calendar_items", [])
+    return resp.json().get("calendar_items", [])
+
+
+def find_calendar_item(items, study):
+    """Return (ref, he_display) for the given study config, or None if not found."""
+    keywords = study["keywords"]
+    prefer_also = study.get("prefer_also", "")
+
+    # First pass: prefer item that matches a keyword AND the prefer_also string
+    if prefer_also:
+        for item in items:
+            title_en = item.get("title", {}).get("en", "")
+            if any(k in title_en for k in keywords) and prefer_also in title_en:
+                he_display = item.get("displayValue", {}).get("he") or item.get("displayValue", {}).get("en", item["ref"])
+                return item["ref"], he_display
+
+    # Second pass: any matching keyword
     for item in items:
-        if "Rambam" in item.get("title", {}).get("en", "") and "3" in item.get("title", {}).get("en", ""):
+        title_en = item.get("title", {}).get("en", "")
+        if any(k in title_en for k in keywords):
             he_display = item.get("displayValue", {}).get("he") or item.get("displayValue", {}).get("en", item["ref"])
             return item["ref"], he_display
-    for item in items:
-        if "Rambam" in item.get("title", {}).get("en", ""):
-            he_display = item.get("displayValue", {}).get("he") or item.get("displayValue", {}).get("en", item["ref"])
-            return item["ref"], he_display
-    raise ValueError("No Rambam entry found in today's Sefaria calendar")
+
+    return None
 
 
 def fetch_text(ref):
@@ -95,53 +135,47 @@ def fetch_text(ref):
 
 
 def flatten_sections(data):
-    """
-    Returns list of (title, [halacha_html, ...]) tuples.
-    Handles single chapter (flat list) and multi-chapter (nested list).
-    """
+    """Returns list of (title, [unit_html, ...]) tuples."""
     he = data["he"]
     node_title = data.get("heTitle") or data.get("title", "")
+    sections_data = data.get("sections", [])
 
     if he and isinstance(he[0], list):
-        # Multi-chapter: he = [[ch1_h1, ch1_h2], [ch2_h1], ...]
-        sections_data = data.get("sections", [])
         result = []
-        for i, chapter_halachot in enumerate(he):
+        for i, units in enumerate(he):
             chapter_num = sections_data[0] + i if sections_data else i + 1
-            result.append((f"{node_title} — פרק {to_hebrew_numeral(chapter_num)}", chapter_halachot))
+            result.append((f"{node_title} — פרק {to_hebrew_numeral(chapter_num)}", units))
         return result
     else:
-        sections_data = data.get("sections", [])
         chapter_num = sections_data[0] if sections_data else ""
         title = f"{node_title} — פרק {to_hebrew_numeral(chapter_num)}" if chapter_num else node_title
         return [(title, he)]
 
 
-def clean_halacha(raw_html):
-    """Strip tags but preserve inner HTML for rendering."""
-    # Remove footnote markers (sup tags) that clutter reading
+def clean_unit(raw_html):
     soup = BeautifulSoup(raw_html, "html.parser")
     for tag in soup.find_all("sup"):
         tag.decompose()
     return str(soup)
 
 
-def build_chapters_html(sections):
+def build_chapters_html(sections, unit_label):
     parts = []
-    for title, halachot in sections:
-        halacha_rows = []
-        for i, raw in enumerate(halachot, 1):
-            text = clean_halacha(raw) if raw else ""
+    for title, units in sections:
+        rows = []
+        for i, raw in enumerate(units, 1):
+            text = clean_unit(raw) if raw else ""
             if not text.strip():
                 continue
-            halacha_rows.append(
+            label = f"{unit_label} {to_hebrew_numeral(i)}" if unit_label else to_hebrew_numeral(i)
+            rows.append(
                 f'<table width="100%" cellpadding="0" cellspacing="0" border="0" dir="rtl"'
                 f' style="margin-bottom:14px;direction:rtl;">'
                 f'<tr>'
                 f'<td valign="top" dir="rtl" width="42"'
                 f' style="font-family:{FONT};font-size:13px;font-weight:700;color:#2c5f2e;'
                 f'padding-top:3px;text-align:right;direction:rtl;white-space:nowrap;">'
-                f'הל\' {to_hebrew_numeral(i)}</td>'
+                f'{label}</td>'
                 f'<td valign="top" dir="rtl"'
                 f' style="font-family:{FONT};font-size:17px;line-height:1.9;color:#1a1a1a;'
                 f'text-align:right;direction:rtl;">'
@@ -149,29 +183,29 @@ def build_chapters_html(sections):
                 f'</tr>'
                 f'</table>'
             )
-        chapter_html = (
+        parts.append(
             f'<table width="100%" cellpadding="0" cellspacing="0" border="0" dir="rtl"'
             f' style="margin-bottom:32px;direction:rtl;">'
             f'<tr><td dir="rtl" style="direction:rtl;">'
             f'<div style="font-family:{FONT};font-size:20px;font-weight:700;color:#2c5f2e;'
             f'border-bottom:2px solid #2c5f2e;padding-bottom:6px;margin-bottom:18px;'
             f'text-align:right;direction:rtl;">{title}</div>'
-            + "".join(halacha_rows) +
+            + "".join(rows) +
             f'</td></tr></table>'
         )
-        parts.append(chapter_html)
     return "\n".join(parts)
 
 
-def build_plain_fallback(sections):
+def build_plain_fallback(sections, unit_label):
     lines = []
-    for title, halachot in sections:
+    for title, units in sections:
         lines.append(title)
         lines.append("=" * len(title))
-        for i, raw in enumerate(halachot, 1):
+        for i, raw in enumerate(units, 1):
             text = BeautifulSoup(raw, "html.parser").get_text(strip=True) if raw else ""
             if text:
-                lines.append(f"הל' {to_hebrew_numeral(i)}. {text}")
+                label = f"{unit_label} {to_hebrew_numeral(i)}" if unit_label else to_hebrew_numeral(i)
+                lines.append(f"{label}. {text}")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -188,40 +222,71 @@ def send_email(subject, html_body, plain_body, gmail_address, app_password, to_e
         server.sendmail(gmail_address, to_email, msg.as_string())
 
 
+def send_error_email(subject, body, gmail_address, app_password, to_email):
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = gmail_address
+    msg["To"] = to_email
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(gmail_address, app_password)
+        server.sendmail(gmail_address, to_email, msg.as_string())
+
+
 def main():
     gmail_address = os.environ["GMAIL_ADDRESS"]
     app_password = os.environ["GMAIL_APP_PASSWORD"]
     to_email = os.environ["TO_EMAIL"]
 
     try:
-        ref, display_value = get_today_rambam_ref()
-        data = fetch_text(ref)
-        sections = flatten_sections(data)
-        chapters_html = build_chapters_html(sections)
-        html_body = HTML_TEMPLATE.format(
-            display_value=display_value,
-            chapters_html=chapters_html,
-            font=FONT,
-        )
-        plain_body = build_plain_fallback(sections)
-        subject = f'רמב"ם יומי — {display_value}'
-        send_email(subject, html_body, plain_body, gmail_address, app_password, to_email)
-        print(f"Email sent: {subject}")
+        calendar_items = get_all_calendar_items()
     except Exception as exc:
-        error_subject = "Daily Rambam: fetch failed"
-        error_body = f"The daily Rambam script encountered an error:\n\n{type(exc).__name__}: {exc}"
         try:
-            plain_msg = MIMEText(error_body, "plain", "utf-8")
-            plain_msg["Subject"] = error_subject
-            plain_msg["From"] = gmail_address
-            plain_msg["To"] = to_email
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                server.login(gmail_address, app_password)
-                server.sendmail(gmail_address, to_email, plain_msg.as_string())
-            print(f"Fallback error email sent: {exc}", file=sys.stderr)
-        except Exception as mail_exc:
-            print(f"Original error: {exc}", file=sys.stderr)
-            print(f"Also failed to send fallback email: {mail_exc}", file=sys.stderr)
+            send_error_email(
+                "שגיאה בלוח השנה היומי",
+                f"לא ניתן היה לקבל את לוח השנה מספריא:\n\n{exc}",
+                gmail_address, app_password, to_email,
+            )
+        except Exception:
+            pass
+        sys.exit(1)
+
+    failed = []
+    for study in STUDIES:
+        he_header = study["he_header"]
+        unit_label = study["unit_label"]
+        try:
+            result = find_calendar_item(calendar_items, study)
+            if result is None:
+                print(f"Skipping {he_header}: not found in today's calendar")
+                continue
+            ref, display_value = result
+            data = fetch_text(ref)
+            sections = flatten_sections(data)
+            chapters_html = build_chapters_html(sections, unit_label)
+            html_body = HTML_TEMPLATE.format(
+                he_header=he_header,
+                display_value=display_value,
+                chapters_html=chapters_html,
+                font=FONT,
+            )
+            plain_body = build_plain_fallback(sections, unit_label)
+            subject = f"{he_header} — {display_value}"
+            send_email(subject, html_body, plain_body, gmail_address, app_password, to_email)
+            print(f"Sent: {subject}")
+        except Exception as exc:
+            print(f"Error sending {he_header}: {exc}", file=sys.stderr)
+            failed.append((he_header, str(exc)))
+
+    if failed:
+        error_lines = "\n".join(f"{name}: {err}" for name, err in failed)
+        try:
+            send_error_email(
+                "שגיאה בשליחת לימוד יומי",
+                f"השגיאות הבאות אירעו:\n\n{error_lines}",
+                gmail_address, app_password, to_email,
+            )
+        except Exception:
+            pass
         sys.exit(1)
 
 
