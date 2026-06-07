@@ -10,6 +10,14 @@ from bs4 import BeautifulSoup
 CALENDAR_URL = "https://www.sefaria.org/api/calendars"
 TEXTS_URL = "https://www.sefaria.org/api/texts/{ref}?context=0&pad=0&lang=he"
 
+_HEB_LETTERS = "אבגדהוזחטיכלמנסעפצקרשת"
+
+def to_hebrew_numeral(n):
+    """Convert 1-based integer to Hebrew letter (א=1 … כ=20 …)."""
+    if 1 <= n <= len(_HEB_LETTERS):
+        return _HEB_LETTERS[n - 1]
+    return str(n)
+
 HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
@@ -116,10 +124,12 @@ def get_today_rambam_ref():
     items = resp.json().get("calendar_items", [])
     for item in items:
         if "Rambam" in item.get("title", {}).get("en", "") and "3" in item.get("title", {}).get("en", ""):
-            return item["ref"], item.get("displayValue", {}).get("en", item["ref"])
+            he_display = item.get("displayValue", {}).get("he") or item.get("displayValue", {}).get("en", item["ref"])
+            return item["ref"], he_display
     for item in items:
         if "Rambam" in item.get("title", {}).get("en", ""):
-            return item["ref"], item.get("displayValue", {}).get("en", item["ref"])
+            he_display = item.get("displayValue", {}).get("he") or item.get("displayValue", {}).get("en", item["ref"])
+            return item["ref"], he_display
     raise ValueError("No Rambam entry found in today's Sefaria calendar")
 
 
@@ -139,7 +149,7 @@ def flatten_sections(data):
     Handles single chapter (flat list) and multi-chapter (nested list).
     """
     he = data["he"]
-    node_title = data.get("title", "")
+    node_title = data.get("heTitle") or data.get("title", "")
 
     if he and isinstance(he[0], list):
         # Multi-chapter: he = [[ch1_h1, ch1_h2], [ch2_h1], ...]
@@ -147,12 +157,12 @@ def flatten_sections(data):
         result = []
         for i, chapter_halachot in enumerate(he):
             chapter_num = sections_data[0] + i if sections_data else i + 1
-            result.append((f"{node_title} פרק {chapter_num}", chapter_halachot))
+            result.append((f"{node_title} — פרק {to_hebrew_numeral(chapter_num)}", chapter_halachot))
         return result
     else:
         sections_data = data.get("sections", [])
         chapter_num = sections_data[0] if sections_data else ""
-        title = f"{node_title} פרק {chapter_num}" if chapter_num else node_title
+        title = f"{node_title} — פרק {to_hebrew_numeral(chapter_num)}" if chapter_num else node_title
         return [(title, he)]
 
 
@@ -175,7 +185,7 @@ def build_chapters_html(sections):
                 continue
             halacha_items.append(
                 f'<div class="halacha">'
-                f'<div class="halacha-num">{i}</div>'
+                f'<div class="halacha-num">הל\' {to_hebrew_numeral(i)}</div>'
                 f'<div class="halacha-text">{text}</div>'
                 f'</div>'
             )
@@ -196,7 +206,7 @@ def build_plain_fallback(sections):
         for i, raw in enumerate(halachot, 1):
             text = BeautifulSoup(raw, "html.parser").get_text(strip=True) if raw else ""
             if text:
-                lines.append(f"{i}. {text}")
+                lines.append(f"הל' {to_hebrew_numeral(i)}. {text}")
         lines.append("")
     return "\n".join(lines).strip()
 
