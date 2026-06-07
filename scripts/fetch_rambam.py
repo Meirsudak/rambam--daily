@@ -98,7 +98,12 @@ def to_hebrew_numeral(n):
 def get_all_calendar_items():
     resp = requests.get(CALENDAR_URL, timeout=30)
     resp.raise_for_status()
-    return resp.json().get("calendar_items", [])
+    items = resp.json().get("calendar_items", [])
+    print("=== Sefaria calendar items ===")
+    for item in items:
+        print(f"  title.en={item.get('title',{}).get('en')} | ref={item.get('ref')} | displayValue.en={item.get('displayValue',{}).get('en')}")
+    print("==============================")
+    return items
 
 
 def find_calendar_item(items, study):
