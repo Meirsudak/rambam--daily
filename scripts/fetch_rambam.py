@@ -18,6 +18,8 @@ def to_hebrew_numeral(n):
         return _HEB_LETTERS[n - 1]
     return str(n)
 
+FONT = "'Frank Ruhl Libre', 'Noto Serif Hebrew', Georgia, serif"
+
 HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
@@ -25,94 +27,43 @@ HTML_TEMPLATE = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;700&display=swap" rel="stylesheet">
-<style>
-  body {{
-    margin: 0;
-    padding: 0;
-    background: #f5f0e8;
-    font-family: 'Frank Ruhl Libre', 'David', 'Times New Roman', serif;
-    direction: rtl;
-    color: #1a1a1a;
-  }}
-  .wrapper {{
-    max-width: 640px;
-    margin: 32px auto;
-    background: #fffdf7;
-    border-radius: 10px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.10);
-    overflow: hidden;
-  }}
-  .header {{
-    background: #2c5f2e;
-    color: #fff;
-    padding: 28px 32px 20px;
-    text-align: center;
-  }}
-  .header h1 {{
-    margin: 0;
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-  }}
-  .header .date {{
-    margin: 6px 0 0;
-    font-size: 14px;
-    opacity: 0.85;
-  }}
-  .body {{
-    padding: 28px 36px 36px;
-  }}
-  .chapter {{
-    margin-bottom: 32px;
-  }}
-  .chapter-title {{
-    font-size: 20px;
-    font-weight: 700;
-    color: #2c5f2e;
-    border-bottom: 2px solid #2c5f2e;
-    padding-bottom: 6px;
-    margin-bottom: 16px;
-  }}
-  .halacha {{
-    display: flex;
-    gap: 10px;
-    margin-bottom: 14px;
-    line-height: 1.85;
-    font-size: 17px;
-    align-items: flex-start;
-  }}
-  .halacha-num {{
-    min-width: 28px;
-    font-weight: 700;
-    color: #2c5f2e;
-    font-size: 14px;
-    padding-top: 4px;
-    flex-shrink: 0;
-    text-align: center;
-  }}
-  .halacha-text {{
-    flex: 1;
-  }}
-  .footer {{
-    text-align: center;
-    padding: 16px;
-    font-size: 12px;
-    color: #999;
-    background: #f5f0e8;
-  }}
-</style>
 </head>
-<body>
-<div class="wrapper">
-  <div class="header">
-    <h1>רמב"ם יומי</h1>
-    <div class="date">{display_value}</div>
-  </div>
-  <div class="body">
-    {chapters_html}
-  </div>
-  <div class="footer">מקור: ספריא</div>
-</div>
+<body style="margin:0;padding:0;background:#f5f0e8;direction:rtl;" dir="rtl">
+<table width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background:#f5f0e8;direction:rtl;" dir="rtl">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="max-width:620px;background:#fffdf7;border-radius:10px;overflow:hidden;font-family:{font};">
+        <!-- header -->
+        <tr>
+          <td align="center" dir="rtl"
+              style="background:#2c5f2e;padding:28px 32px 22px;text-align:center;">
+            <div style="font-family:{font};font-size:28px;font-weight:700;color:#fff;margin:0;">
+              רמב"ם יומי
+            </div>
+            <div style="font-family:{font};font-size:15px;color:#c8e6c9;margin-top:6px;">
+              {display_value}
+            </div>
+          </td>
+        </tr>
+        <!-- body -->
+        <tr>
+          <td dir="rtl" style="padding:28px 36px 36px;direction:rtl;">
+            {chapters_html}
+          </td>
+        </tr>
+        <!-- footer -->
+        <tr>
+          <td align="center"
+              style="background:#f5f0e8;padding:14px;font-family:{font};font-size:12px;color:#999;">
+            מקור: ספריא
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
 </body>
 </html>
 """
@@ -178,23 +129,37 @@ def clean_halacha(raw_html):
 def build_chapters_html(sections):
     parts = []
     for title, halachot in sections:
-        halacha_items = []
+        halacha_rows = []
         for i, raw in enumerate(halachot, 1):
             text = clean_halacha(raw) if raw else ""
             if not text.strip():
                 continue
-            halacha_items.append(
-                f'<div class="halacha">'
-                f'<div class="halacha-num">הל\' {to_hebrew_numeral(i)}</div>'
-                f'<div class="halacha-text">{text}</div>'
-                f'</div>'
+            halacha_rows.append(
+                f'<table width="100%" cellpadding="0" cellspacing="0" border="0" dir="rtl"'
+                f' style="margin-bottom:14px;direction:rtl;">'
+                f'<tr>'
+                f'<td valign="top" dir="rtl" width="42"'
+                f' style="font-family:{FONT};font-size:13px;font-weight:700;color:#2c5f2e;'
+                f'padding-top:3px;text-align:right;direction:rtl;white-space:nowrap;">'
+                f'הל\' {to_hebrew_numeral(i)}</td>'
+                f'<td valign="top" dir="rtl"'
+                f' style="font-family:{FONT};font-size:17px;line-height:1.9;color:#1a1a1a;'
+                f'text-align:right;direction:rtl;">'
+                f'{text}</td>'
+                f'</tr>'
+                f'</table>'
             )
-        parts.append(
-            f'<div class="chapter">'
-            f'<div class="chapter-title">{title}</div>'
-            + "".join(halacha_items) +
-            f'</div>'
+        chapter_html = (
+            f'<table width="100%" cellpadding="0" cellspacing="0" border="0" dir="rtl"'
+            f' style="margin-bottom:32px;direction:rtl;">'
+            f'<tr><td dir="rtl" style="direction:rtl;">'
+            f'<div style="font-family:{FONT};font-size:20px;font-weight:700;color:#2c5f2e;'
+            f'border-bottom:2px solid #2c5f2e;padding-bottom:6px;margin-bottom:18px;'
+            f'text-align:right;direction:rtl;">{title}</div>'
+            + "".join(halacha_rows) +
+            f'</td></tr></table>'
         )
+        parts.append(chapter_html)
     return "\n".join(parts)
 
 
@@ -236,6 +201,7 @@ def main():
         html_body = HTML_TEMPLATE.format(
             display_value=display_value,
             chapters_html=chapters_html,
+            font=FONT,
         )
         plain_body = build_plain_fallback(sections)
         subject = f'רמב"ם יומי — {display_value}'
