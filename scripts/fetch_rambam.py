@@ -21,21 +21,6 @@ STUDIES = [
         "he_header": 'רמב"ם יומי',
         "unit_label": "הל'",
     },
-    {
-        "keywords": ["Tanya"],
-        "he_header": "תניא יומי",
-        "unit_label": "פס'",
-    },
-    {
-        "keywords": ["Psalms", "Tehillim"],
-        "he_header": "תהילים יומי",
-        "unit_label": "פס'",
-    },
-    {
-        "keywords": ["Chumash", "Chitas", "Torah Portion", "Parasha"],
-        "he_header": "חומש יומי",
-        "unit_label": "פס'",
-    },
 ]
 
 HTML_TEMPLATE = """\
